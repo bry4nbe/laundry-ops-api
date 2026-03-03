@@ -1,0 +1,24 @@
+# Entornos Virtuales
+venv/
+env/
+.env
+
+# Python / Django
+*.pyc
+__pycache__/
+db.sqlite3
+media/
+staticfiles/
+*.log
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.tox/
+
+# Configuración de equipo (VSCode settings SÍ se suben, por eso no están aquí)
+# Archivos de Sistema Operativo
+Thumbs.db
+desktop.ini
+.DS_Store
