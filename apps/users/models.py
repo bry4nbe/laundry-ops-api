@@ -8,13 +8,14 @@ class UserRole(models.TextChoices):
 
 
 class User(AbstractUser):
+    username = None
     name = models.CharField(max_length=255)
     email = models.EmailField(unique=True)
     role = models.CharField(
         max_length=20, choices=UserRole.choices, default=UserRole.OPERATOR
     )
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["username"]
+    REQUIRED_FIELDS = ["name"]
 
     def __str__(self):
         return self.email
