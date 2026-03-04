@@ -9,6 +9,8 @@ class UserRole(models.TextChoices):
 
 class User(AbstractUser):
     username = None
+    first_name = None
+    last_name = None
     name = models.CharField(max_length=255)
     email = models.EmailField(unique=True)
     role = models.CharField(
