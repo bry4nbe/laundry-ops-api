@@ -1,13 +1,29 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
+
+
+class OrderStatus(models.TextChoices):
+    RECEIVED = "RECEIVED", "Received"
+    READY = "READY", "Ready"
+    DELIVERED = "DELIVERED", "Delivered"
+    CANCELLED = "CANCELLED", "Cancelled"
 
 
 class Order(models.Model):
     order_number = models.CharField(max_length=100, unique=True)
-    client_id = models.ForeignKey
-    created_by = models.ForeignKey
-    status = models.TextChoices
+    client = models.ForeignKey(
+        "clients.Client", on_delete=models.PROTECT, related_name="orders"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_orders",
+    )
+    status = models.CharField(
+        max_length=20, choices=OrderStatus.choices, default=OrderStatus.RECEIVED
+    )
     total_amount = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
