@@ -4,7 +4,6 @@ charset-normalizer==3.4.4
 cloudinary==1.44.1
 Django==6.0.2
 django-cloudinary-storage==0.3.0
-django-fsm==3.0.1
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 idna==3.11

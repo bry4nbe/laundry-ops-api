@@ -6,7 +6,6 @@ cloudinary==1.44.1
 colorama==0.4.6
 Django==6.0.2
 django-cloudinary-storage==0.3.0
-django-fsm==3.0.1
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 factory_boy==3.3.3
