@@ -1,12 +1,10 @@
-from decimal import Decimal
-
 from django.conf import settings
 from django.db import models
 
 
 class PaymentMethod(models.TextChoices):
     CASH = "CASH", "Cash"
-    CREDIT_CARD = "YAPE/PLIN", "Yape/Plin"
+    YAPE_PLIN = "YAPE_PLIN", "Yape/Plin"
     OTHER = "OTHER", "Other"
 
 
@@ -17,18 +15,18 @@ class PaymentType(models.TextChoices):
 
 
 class Payment(models.Model):
-    order = models.ForeignKey("orders.Order", on_delete=models.CASCADE)
+    order = models.ForeignKey(
+        "orders.Order", on_delete=models.CASCADE, related_name="payments"
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="created_payments",
     )
-    amount = models.DecimalField(
-        max_digits=10, decimal_places=2, default=(Decimal("0.00"))
-    )
-    payment_method = models.CharField(max_length=50)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices)
     reference_code = models.CharField(max_length=100, blank=True, default="")
-    payment_type = models.CharField(max_length=50)
+    payment_type = models.CharField(max_length=50, choices=PaymentType.choices)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
