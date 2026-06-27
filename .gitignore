@@ -1,7 +1,12 @@
 # Entornos Virtuales
+.venv/
 venv/
 env/
+
+# Variables de entorno
 .env
+.env.*
+!.env.example
 
 # Python / Django
 *.pyc
@@ -13,12 +18,19 @@ staticfiles/
 
 # Testing
 .pytest_cache/
+.ruff_cache/
 htmlcov/
 .coverage
 .tox/
 
-# Configuración de equipo (VSCode settings SÍ se suben, por eso no están aquí)
-# Archivos de Sistema Operativo
+# IDE
+.idea/
+
+# Sistema Operativo
 Thumbs.db
 desktop.ini
 .DS_Store
+
+
+.claude/
+CLAUDE.md

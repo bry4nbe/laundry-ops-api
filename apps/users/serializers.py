@@ -9,8 +9,8 @@ from apps.users.models import User
 class UserMeSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "name", "email", "role"]
-        read_only_fields = ["id", "name", "email", "role"]
+        fields = ["id", "username", "name", "email", "role"]
+        read_only_fields = fields
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
