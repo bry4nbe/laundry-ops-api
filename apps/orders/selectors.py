@@ -50,4 +50,10 @@ def get_orders(filters):
     if date_to:
         queryset = queryset.filter(created_at__date__lte=date_to)
 
+    search = validated_filters.get("search")
+    if search:
+        queryset = queryset.filter(
+            Q(client__name__icontains=search) | Q(order_number__icontains=search)
+        )
+
     return queryset

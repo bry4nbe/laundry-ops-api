@@ -353,6 +353,136 @@ def test_dry_cleaning_updates_status(auth_client, client_obj, suit):
     assert item.dry_cleaning_status == DryCleaningStatus.SENT
 
 
+@pytest.mark.parametrize("search_by", ["client_name", "order_number"])
+def test_list_search_matches_client_name_or_order_number(
+    auth_client, client_obj, shirt, search_by
+):
+    api, user = auth_client
+    order = make_order(
+        client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("1")}]
+    )
+    other_client = Client.objects.create(name="Other Customer")
+    make_order(other_client, user, [{"catalog_item": shirt, "quantity": Decimal("1")}])
+    term = "  aRCO aLc  " if search_by == "client_name" else order.order_number.lower()
+    response = api.get("/api/orders/", {"search": term})
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert [row["id"] for row in response.data["results"]] == [order.pk]
+
+
+@pytest.mark.parametrize("term", ["", " \t "])
+def test_blank_search_does_not_filter_orders(auth_client, client_obj, shirt, term):
+    api, user = auth_client
+    order = make_order(
+        client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("1")}]
+    )
+    response = api.get("/api/orders/", {"search": term})
+    assert response.status_code == 200
+    assert [row["id"] for row in response.data["results"]] == [order.pk]
+
+
+def test_search_without_matches_returns_empty_page(auth_client, client_obj, shirt):
+    api, user = auth_client
+    make_order(client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("1")}])
+    response = api.get("/api/orders/", {"search": "not-a-matching-customer"})
+    assert response.status_code == 200
+    assert response.data["count"] == 0
+    assert response.data["results"] == []
+
+
+def test_search_pending_orders_excludes_closed_orders_and_keeps_real_balances(
+    auth_client, client_obj, shirt
+):
+    api, user = auth_client
+    orders = [
+        make_order(
+            client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("2")}]
+        )
+        for _ in range(3)
+    ]
+    Order.objects.filter(pk=orders[1].pk).update(delivered_at=timezone.now())
+    Order.objects.filter(pk=orders[2].pk).update(cancelled_at=timezone.now())
+    Payment.objects.create(
+        order=orders[0],
+        created_by=user,
+        amount=Decimal("2.00"),
+        payment_method=PaymentMethod.CASH,
+        payment_type=PaymentType.PARTIAL,
+    )
+    response = api.get("/api/orders/", {"search": "marco", "delivered": "false"})
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    row = response.data["results"][0]
+    assert row["id"] == orders[0].pk
+    assert row["status"] == "ACTIVE"
+    assert row["total_amount"] == "10.00"
+    assert row["paid_amount"] == "2.00"
+    assert row["balance"] == "8.00"
+
+
+def test_search_combines_with_existing_client_and_date_filters(
+    auth_client, client_obj, shirt
+):
+    api, user = auth_client
+    items = [{"catalog_item": shirt, "quantity": Decimal("1")}]
+    today = timezone.localdate().isoformat()
+    wanted = make_order(client_obj, user, items)
+    old = make_order(client_obj, user, items)
+    Order.objects.filter(pk=old.pk).update(created_at="2000-01-01T12:00:00Z")
+    other = Client.objects.create(name="Marco Other")
+    make_order(other, user, items)
+    response = api.get(
+        "/api/orders/",
+        {
+            "search": "marco",
+            "delivered": "false",
+            "client": client_obj.pk,
+            "date_from": today,
+            "date_to": today,
+        },
+    )
+    assert response.status_code == 200
+    assert [row["id"] for row in response.data["results"]] == [wanted.pk]
+
+
+def test_search_keeps_pagination_ordering_and_constant_queries(
+    auth_client, client_obj, shirt, django_assert_num_queries
+):
+    api, user = auth_client
+    identifiers = []
+    created_at = timezone.now()
+    for _ in range(21):
+        order = make_order(
+            client_obj,
+            user,
+            [
+                {"catalog_item": shirt, "quantity": Decimal("1")},
+                {"catalog_item": shirt, "quantity": Decimal("1")},
+            ],
+        )
+        identifiers.append(order.pk)
+        Order.objects.filter(pk=order.pk).update(created_at=created_at)
+        Payment.objects.create(
+            order=order,
+            created_by=user,
+            amount=Decimal("2.00"),
+            payment_method=PaymentMethod.CASH,
+            payment_type=PaymentType.PARTIAL,
+        )
+    with django_assert_num_queries(4):
+        first = api.get("/api/orders/", {"search": "marco", "delivered": "false"})
+    assert first.status_code == 200
+    assert first.data["count"] == 21
+    assert [row["id"] for row in first.data["results"]] == list(reversed(identifiers))[
+        :20
+    ]
+    assert all(row["balance"] == "8.00" for row in first.data["results"])
+    with django_assert_num_queries(4):
+        second = api.get(first.data["next"])
+    assert second.status_code == 200
+    assert [row["id"] for row in second.data["results"]] == [identifiers[0]]
+
+
 def test_dry_cleaning_on_non_dry_cleaning_item_returns_400(
     auth_client, client_obj, shirt
 ):

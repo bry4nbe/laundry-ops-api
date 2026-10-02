@@ -58,6 +58,39 @@ Las pruebas de autenticación y el flujo completo de órdenes obtienen JWT media
 
 La cobertura es selectiva: autenticación, validaciones de IDs y filtros, cálculos y precios históricos, estados y rollback de operaciones rechazadas. La expiración del access se prueba con un token vencido, sin esperar su hora de duración. Logout revoca el refresh, pero un access ya emitido sigue siendo válido hasta su expiración.
 
+## Dashboard operativo y financiero
+
+`GET /api/dashboard/` devuelve un resumen sin paginación y exige JWT de un usuario con `role=ADMIN`. Los operadores reciben `403`, aunque tengan `is_staff` o `is_superuser`; esas banderas no sustituyen el rol de negocio. Sin JWT válido devuelve `401` y los métodos de escritura devuelven `405` para un administrador autenticado.
+
+Sin filtros consulta hoy según `America/Lima`. Para consultar un período, enviar `date_from` y `date_to` juntos, en formato `YYYY-MM-DD`, por ejemplo `/api/dashboard/?date_from=2026-10-01&date_to=2026-10-02`. Ambos días están incluidos. Las fechas inválidas, incompletas, invertidas o cuyo límite final no sea representable devuelven `400`. Semana y mes se expresan con fechas, sin filtros especiales.
+
+Ejemplo de respuesta:
+
+```json
+{"date_from": "2026-10-02", "date_to": "2026-10-02", "orders_created": 3, "pending_delivery_count": 2, "collected_amount": "31.00", "collected_by_method": {"CASH": "18.00", "YAPE_PLIN": "13.00"}, "outstanding_amount": "22.00", "current_month_monitor": {"month": "2026-10", "collected_amount": "31.00", "above_5000": false, "above_8000": false, "indicative_only": true}}
+```
+
+- `orders_created` cuenta todas las órdenes ingresadas en el rango, incluidas las posteriormente canceladas.
+- `pending_delivery_count` es global y actual: cuenta órdenes sin `delivered_at` ni `cancelled_at`, independientemente del rango.
+- `collected_amount` y `collected_by_method` suman pagos vigentes por fecha de cobro, no por fecha de creación de la orden. Los pagos vigentes de órdenes canceladas siguen siendo ingresos. Siempre se devuelven `CASH` y `YAPE_PLIN`.
+- `outstanding_amount` suma el saldo actual de órdenes creadas en el rango: incluye entregadas con deuda y excluye canceladas. Resta todos sus pagos vigentes, incluso los registrados fuera del rango. No reconstruye la deuda histórica al cierre del período.
+- Los importes son cadenas con dos decimales y pueden superar el máximo de una orden individual. Los conteos son enteros; sin datos se devuelven ceros, no `null`.
+- Anular un pago recalcula también los cobros de períodos anteriores y el saldo vigente. No representa una devolución. Los resultados se calculan mediante agregación SQL, sin caché, y se actualizan en cada petición; el refresco automático de pantalla corresponde al futuro frontend.
+
+### Monitor mensual orientativo
+
+`current_month_monitor` corresponde siempre al mes calendario actual en Lima, no al período filtrado. Sus cobros excluyen anulados. `above_5000` y `above_8000` se activan estrictamente por encima de S/ 5,000 y S/ 8,000; igualar un umbral no lo supera. `indicative_only` siempre es `true`.
+
+Este monitor solo compara cobros registrados con referencias mensuales: no determina la categoría NRUS, la obligación de pago ni el cumplimiento tributario. SUNAT considera también compras y otros límites que esta versión no calcula. [Referencia oficial de SUNAT](https://www.gob.pe/institucion/sunat/pages/6988-nuevo-regimen-unico-simplificado-nrus).
+
+### Buscar pendientes de entrega
+
+Administradores y operadores usan el listado existente: `GET /api/orders/?delivered=false&search=Marco`. `search` busca coincidencias parciales por nombre del cliente o número de orden, sin distinguir mayúsculas y recortando espacios externos. Una búsqueda vacía no filtra. Puede combinarse con los filtros existentes de cliente y fechas; `delivered=false` excluye entregadas y canceladas.
+
+Se conserva la respuesta de órdenes con sus saldos reales, paginación de 20 y orden de más reciente a más antigua, desempate por identificador. No existe otro endpoint de pendientes.
+
+El dashboard no introduce modelos ni migraciones. US-19 queda parcialmente cubierta: costos del tercero, ganancias y distribución financiera por servicio están diferidos. No incluye frontend, gastos, caja formal ni reportes fiscales, y no configura CI ni pytest. Las regresiones reutilizan la suite existente sobre una base aislada.
+
 ## Django Admin
 
 Los usuarios se desactivan con `is_active=False`; no se pueden eliminar desde Admin. El correo es opcional y se guarda como `NULL` cuando está vacío.

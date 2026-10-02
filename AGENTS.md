@@ -59,7 +59,7 @@ Define success criteria before implementing.
 
 ## Architecture
 
-Five apps under apps/: users, clients, catalog, orders, payments.
+Six apps under apps/: users, clients, catalog, orders, payments, dashboard (read-only, no models or migrations).
 - Migration dependency chain: catalog ← orders (OrderItem.catalog_item FK) ← payments. Renaming/altering catalog or orders models requires regenerating migrations for dependents too.
 - Deleting/renaming a migration file that a dependent app references by name (e.g. payments' `('orders', '0001_initial')`) breaks `makemigrations` for the whole project with `NodeNotFoundError`, even for unrelated apps — delete and regenerate both apps' migrations together, keeping the same file name.
 - Test convention: `apps/<app>/tests/test_<app>.py` (package, not the default `tests.py`) — delete the placeholder `tests.py` when adding real tests to a new app.
