@@ -70,6 +70,7 @@ class OrderFilterSerializer(serializers.Serializer):
     client = serializers.IntegerField(required=False, min_value=1)
     date_from = serializers.DateField(required=False)
     date_to = serializers.DateField(required=False)
+    search = serializers.CharField(required=False, allow_blank=True)
 
 
 class OrderDetailSerializer(serializers.ModelSerializer):
