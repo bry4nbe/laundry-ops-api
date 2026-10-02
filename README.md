@@ -6,8 +6,10 @@ Flujo sencillo con `main` estable y ramas temporales `develop/<cambio>`. `develo
 
 1. Partir de `main` actualizada y crear una rama para cada cambio.
 2. Desarrollar en esa rama y separar los cambios en Conventional Commits, por ejemplo `fix(orders): reject invalid quantities` o `feat(payments): register manual payments`.
-3. Publicar la rama y abrir un pull request hacia `main`; revisar el diff y realizar la verificación local adecuada al cambio.
-4. Fusionar el pull request conservando los commits separados y eliminar la rama de trabajo cuando ya no se necesite. No hacer commits ni push de cambios directamente a `main`.
+3. Revisar el diff y verificar el cambio en su rama antes de integrarlo. Hacer merge local a `main` con `--no-ff`, conservando los commits separados y registrando la integración del módulo.
+4. Verificar el resultado integrado y hacer push de `main` únicamente cuando todas las comprobaciones hayan pasado. No desarrollar funcionalidades directamente en `main` ni publicar conflictos sin resolver o validaciones fallidas.
+
+Las pull requests son opcionales para una revisión adicional; no son un requisito de este flujo para un único desarrollador. Publicar la rama de trabajo también es opcional. La rama puede eliminarse cuando la integración haya sido verificada y publicada, si ya no se necesita.
 
 Inicio de un cambio, con el árbol de trabajo limpio:
 
@@ -17,13 +19,31 @@ git pull --ff-only origin main
 git switch -c develop/nombre-del-cambio
 ```
 
-Después de realizar y confirmar los cambios:
+Después de realizar, confirmar y verificar los cambios, con el árbol de trabajo limpio:
 
 ```powershell
-git push -u origin develop/nombre-del-cambio
+git switch main
+git pull --ff-only origin main
+git merge --no-ff develop/nombre-del-cambio
 ```
 
-Esta iteración establece únicamente el flujo de ramas y commits. No configura CI ni protecciones de GitHub; la configuración y las pruebas existentes de pytest se mantienen sin cambios. Hasta configurar protecciones, el uso de pull requests se cumple por convención.
+Si el merge genera conflictos, resolverlos y verificar el resultado antes de publicar. Para este backend, reutilizar las comprobaciones existentes en una base PostgreSQL de pruebas aislada:
+
+```powershell
+. .\.venv\Scripts\Activate.ps1
+python -m pytest -p no:cacheprovider
+python -m ruff check . --no-cache
+python manage.py check
+python manage.py makemigrations --check --dry-run
+```
+
+Solo si todas las comprobaciones pasan, publicar el resultado integrado:
+
+```powershell
+git push origin main
+```
+
+Este flujo no configura CI ni protecciones de GitHub; la configuración y las pruebas existentes de pytest se mantienen sin cambios. El push directo requiere que las reglas del repositorio lo permitan. Si el servidor exige pull requests, respetar esa restricción sin forzar ni desactivar protecciones.
 
 ## Pruebas
 
