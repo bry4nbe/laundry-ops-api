@@ -30,3 +30,27 @@ def test_search_is_partial_and_case_insensitive(auth_client):
     assert response.status_code == 200
     assert len(response.data) == 1
     assert response.data[0]["name"] == "Marco Alca"
+
+
+def test_multiple_clients_without_phone_store_null(auth_client):
+    for name in ["First Client", "Second Client"]:
+        response = auth_client.post(
+            "/api/clients/", {"name": name, "phone_number": ""}, format="json"
+        )
+        assert response.status_code == 201
+        assert response.data["phone_number"] is None
+    assert Client.objects.filter(phone_number__isnull=True).count() == 2
+
+
+def test_clearing_phone_does_not_collide_with_other_clients_without_phone(auth_client):
+    Client.objects.create(name="Without Phone", phone_number=None)
+    client = Client.objects.create(name="With Phone", phone_number="911111111")
+
+    response = auth_client.patch(
+        f"/api/clients/{client.id}/", {"phone_number": ""}, format="json"
+    )
+
+    assert response.status_code == 200
+    client.refresh_from_db()
+    assert client.phone_number is None
+    assert Client.objects.filter(phone_number__isnull=True).count() == 2

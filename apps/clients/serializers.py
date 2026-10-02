@@ -4,6 +4,9 @@ from .models import Client
 
 
 class ClientSerializer(serializers.ModelSerializer):
+    def validate_phone_number(self, value):
+        return value or None
+
     class Meta:
         model = Client
         fields = ["id", "name", "phone_number", "created_at", "updated_at"]
