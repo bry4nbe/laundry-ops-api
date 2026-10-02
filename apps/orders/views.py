@@ -6,6 +6,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.payments import services as payment_services
+from apps.payments.serializers import InitialPaymentSerializer
+
 from . import selectors, services
 from .models import Order, OrderItem
 from .serializers import (
@@ -33,18 +36,32 @@ class OrderListCreateView(generics.ListCreateAPIView):
         return OrderDetailSerializer
 
     def create(self, request, *args, **kwargs):
+        if isinstance(request.data, dict) and request.data.get("payment") is not None:
+            payment_serializer = InitialPaymentSerializer(data=request.data["payment"])
+            payment_serializer.is_valid(raise_exception=True)
+            if payment_serializer.validated_data["amount"] > 0:
+                key, fingerprint = payment_services.request_identity(request)
+                replay = payment_services.get_replay(key, fingerprint)
+                if replay is not None:
+                    order = selectors.order_queryset().get(pk=replay.order_id)
+                    return Response(OrderDetailSerializer(order).data)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save(created_by=request.user)
+        order = selectors.order_queryset().get(pk=order.pk)
         return Response(
             OrderDetailSerializer(order).data,
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_201_CREATED
+            if serializer.was_created
+            else status.HTTP_200_OK,
         )
 
 
 class OrderDetailView(generics.RetrieveAPIView):
-    queryset = Order.objects.select_related("client")
     serializer_class = OrderDetailSerializer
+
+    def get_queryset(self):
+        return selectors.order_queryset()
 
     def patch(self, request, *args, **kwargs):
         order = self.get_object()
@@ -56,6 +73,7 @@ class OrderDetailView(generics.RetrieveAPIView):
         serializer = OrderUpdateSerializer(order, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+        order = selectors.order_queryset().get(pk=order.pk)
         return Response(OrderDetailSerializer(order).data)
 
 
@@ -67,6 +85,7 @@ class OrderDeliverView(APIView):
             raise services.OrderConflict("La orden ya fue entregada o cancelada.")
         order.delivered_at = timezone.now()
         order.save(update_fields=["delivered_at"])
+        order = selectors.order_queryset().get(pk=order.pk)
         return Response(OrderDetailSerializer(order).data)
 
 

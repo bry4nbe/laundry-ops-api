@@ -1,0 +1,15 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p>Se anulará el pago #{{ payment.pk }} de la orden {{ payment.order.order_number }}, por S/ {{ payment.amount }}.</p>
+<p>El registro original se conserva. Esta corrección no representa una devolución de dinero y no se puede revertir.</p>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <input type="hidden" name="action" value="void_selected_payment">
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ payment.pk }}">
+    <input type="hidden" name="select_across" value="0">
+    <input type="submit" name="confirm_void" value="Confirmar anulación">
+    <a href="{% url 'admin:payments_payment_changelist' %}">Cancelar</a>
+</form>
+{% endblock %}

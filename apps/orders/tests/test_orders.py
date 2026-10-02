@@ -1,7 +1,11 @@
 import json
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
+from django.contrib import admin
+from django.db import transaction
+from django.forms import inlineformset_factory
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.exceptions import APIException
@@ -10,7 +14,10 @@ from rest_framework.test import APIClient
 from apps.catalog.models import CatalogItem, ServiceType
 from apps.clients.models import Client
 from apps.orders import services
+from apps.orders.admin import OrderAdmin
 from apps.orders.models import DryCleaningStatus, Order, OrderItem
+from apps.payments import services as payment_services
+from apps.payments.models import Payment, PaymentMethod, PaymentType
 from apps.users.models import User
 
 
@@ -1220,3 +1227,325 @@ def test_admin_can_correct_order_state_and_dry_cleaning_tracking(
     assert order.notes == "Corrected notes"
     assert order.items.get().dry_cleaning_status == DryCleaningStatus.SENT
     assert order.total_amount == Decimal("20.00")
+
+
+@pytest.mark.parametrize(
+    "payment_data",
+    ["absent", None, {"amount": "0.00"}, {"amount": "0", "payment_method": "CASH"}],
+)
+def test_create_order_without_positive_advance_has_no_payment(
+    auth_client, client_obj, shirt, payment_data
+):
+    api, _ = auth_client
+    body = {
+        "client": client_obj.pk,
+        "items": [{"catalog_item": shirt.pk, "quantity": "2.00"}],
+    }
+    if payment_data != "absent":
+        body["payment"] = payment_data
+    response = api.post(
+        reverse("order-list-create"),
+        body,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="ignored-without-advance",
+    )
+    assert response.status_code == 201
+    assert response.data["paid_amount"] == "0.00"
+    assert response.data["balance"] == "10.00"
+    assert Payment.objects.count() == 0
+
+
+@pytest.mark.parametrize("method", PaymentMethod.values)
+@pytest.mark.parametrize(
+    "amount,payment_type,balance",
+    [("4.00", PaymentType.ADVANCE, "6.00"), ("10.00", PaymentType.FINAL, "0.00")],
+)
+def test_create_order_with_advance_or_full_payment(
+    auth_client, client_obj, shirt, method, amount, payment_type, balance
+):
+    api, user = auth_client
+    response = api.post(
+        reverse("order-list-create"),
+        {
+            "client": client_obj.pk,
+            "items": [{"catalog_item": shirt.pk, "quantity": "2.00"}],
+            "payment": {
+                "amount": amount,
+                "payment_method": method,
+                "reference_code": "INITIAL-REF",
+            },
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+    )
+    assert response.status_code == 201
+    assert response.data["paid_amount"] == amount
+    assert response.data["balance"] == balance
+    payment = Payment.objects.get()
+    assert payment.order_id == response.data["id"]
+    assert payment.created_by_id == user.pk
+    assert payment.payment_type == payment_type
+    assert payment.reference_code == "INITIAL-REF"
+
+
+@pytest.mark.parametrize(
+    "payment_data",
+    [
+        {"amount": "10.01", "payment_method": "CASH"},
+        {"amount": "-1.00", "payment_method": "CASH"},
+        {"amount": "0.001", "payment_method": "CASH"},
+        {"amount": "5.00"},
+        {"amount": "5.00", "payment_method": "OTHER"},
+        {"amount": "bad", "payment_method": "CASH"},
+    ],
+)
+def test_invalid_advance_rolls_back_entire_order(
+    auth_client, client_obj, shirt, payment_data
+):
+    api, _ = auth_client
+    key = str(uuid4())
+    response = api.post(
+        reverse("order-list-create"),
+        {
+            "client": client_obj.pk,
+            "items": [{"catalog_item": shirt.pk, "quantity": "2.00"}],
+            "payment": payment_data,
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+    assert response.status_code == 400
+    assert (
+        Order.objects.count()
+        == OrderItem.objects.count()
+        == Payment.objects.count()
+        == 0
+    )
+    retry = api.post(
+        reverse("order-list-create"),
+        {
+            "client": client_obj.pk,
+            "items": [{"catalog_item": shirt.pk, "quantity": "2.00"}],
+            "payment": {"amount": "5.00", "payment_method": "CASH"},
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+    assert retry.status_code == 201
+
+
+def test_invalid_order_with_advance_does_not_record_payment(
+    auth_client, client_obj, inactive_item
+):
+    api, _ = auth_client
+    response = api.post(
+        reverse("order-list-create"),
+        {
+            "client": client_obj.pk,
+            "items": [{"catalog_item": inactive_item.pk, "quantity": "2.00"}],
+            "payment": {"amount": "1.00", "payment_method": "CASH"},
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+    )
+    assert response.status_code == 400
+    assert (
+        Order.objects.count()
+        == OrderItem.objects.count()
+        == Payment.objects.count()
+        == 0
+    )
+
+
+@pytest.mark.parametrize("key", [None, "not-a-uuid"])
+def test_positive_advance_requires_uuid(auth_client, client_obj, shirt, key):
+    api, _ = auth_client
+    headers = {} if key is None else {"HTTP_IDEMPOTENCY_KEY": key}
+    response = api.post(
+        reverse("order-list-create"),
+        {
+            "client": client_obj.pk,
+            "items": [{"catalog_item": shirt.pk, "quantity": "2.00"}],
+            "payment": {"amount": "5.00", "payment_method": "CASH"},
+        },
+        format="json",
+        **headers,
+    )
+    assert response.status_code == 400
+    assert Order.objects.count() == Payment.objects.count() == 0
+
+
+def record_order_payment(api, order, amount="5.00"):
+    response = api.post(
+        reverse("order-payments", args=[order.pk]),
+        {"amount": amount, "payment_method": "CASH"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+    )
+    assert response.status_code == 201
+    return Payment.objects.get(pk=response.data["id"])
+
+
+@pytest.mark.parametrize(
+    "change", ["catalog", "quantity", "price", "remove", "identical"]
+)
+def test_active_payment_blocks_all_economic_item_changes(
+    auth_client, client_obj, shirt, suit, change
+):
+    api, user = auth_client
+    order = make_order(
+        client_obj,
+        user,
+        [
+            {"catalog_item": shirt, "quantity": Decimal("1.00")},
+            {"catalog_item": suit, "quantity": Decimal("1.00")},
+        ],
+    )
+    record_order_payment(api, order)
+    items = [
+        {
+            "id": item.pk,
+            "catalog_item": item.catalog_item_id,
+            "quantity": str(item.quantity),
+            "unit_price": str(item.unit_price),
+        }
+        for item in order.items.order_by("id")
+    ]
+    if change == "catalog":
+        items[0]["catalog_item"] = suit.pk
+    elif change == "quantity":
+        items[0]["quantity"] = "2.00"
+    elif change == "price":
+        items[0]["unit_price"] = "1.00"
+    elif change == "remove":
+        items = items[:1]
+    response = api.patch(
+        reverse("order-detail", args=[order.pk]), {"items": items}, format="json"
+    )
+    assert response.status_code == 409
+    order.refresh_from_db()
+    assert order.total_amount == Decimal("25.00")
+    assert order.items.count() == 2
+    assert order.items.get(catalog_item=shirt).quantity == Decimal("1.00")
+
+
+def test_active_payment_allows_client_and_notes_changes(auth_client, client_obj, shirt):
+    api, user = auth_client
+    order = make_order(
+        client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("2.00")}]
+    )
+    record_order_payment(api, order)
+    new_client = Client.objects.create(name="Corrected customer")
+    response = api.patch(
+        reverse("order-detail", args=[order.pk]),
+        {"client": new_client.pk, "notes": "Corrected notes"},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert response.data["client"]["id"] == new_client.pk
+    assert response.data["notes"] == "Corrected notes"
+    assert response.data["paid_amount"] == "5.00"
+    assert response.data["balance"] == "5.00"
+
+
+def test_only_voiding_all_payments_unlocks_economic_editing(
+    auth_client, client_obj, shirt, admin_user
+):
+    api, user = auth_client
+    order = make_order(
+        client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("3.00")}]
+    )
+    first = record_order_payment(api, order)
+    second = record_order_payment(api, order)
+    body = {"items": [{"catalog_item": shirt.pk, "quantity": "1.00"}]}
+    payment_services.void_payment(
+        first.pk, voided_by=admin_user, reason="First correction"
+    )
+    assert (
+        api.patch(
+            reverse("order-detail", args=[order.pk]), body, format="json"
+        ).status_code
+        == 409
+    )
+    payment_services.void_payment(
+        second.pk, voided_by=admin_user, reason="Second correction"
+    )
+    response = api.patch(reverse("order-detail", args=[order.pk]), body, format="json")
+    assert response.status_code == 200
+    assert response.data["total_amount"] == "5.00"
+    assert response.data["paid_amount"] == "0.00"
+    assert response.data["balance"] == "5.00"
+    assert order.payments.count() == 2
+
+
+@pytest.mark.parametrize("closed_field", ["delivered_at", "cancelled_at"])
+def test_voiding_all_payments_does_not_unlock_closed_order(
+    auth_client, client_obj, shirt, admin_user, closed_field
+):
+    api, user = auth_client
+    order = make_order(
+        client_obj, user, [{"catalog_item": shirt, "quantity": Decimal("2.00")}]
+    )
+    payment = record_order_payment(api, order)
+    setattr(order, closed_field, timezone.now())
+    order.save(update_fields=[closed_field])
+    payment_services.void_payment(payment.pk, voided_by=admin_user, reason="Correction")
+    response = api.patch(
+        reverse("order-detail", args=[order.pk]),
+        {"items": [{"catalog_item": shirt.pk, "quantity": "1.00"}]},
+        format="json",
+    )
+    assert response.status_code == 409
+    order.refresh_from_db()
+    assert order.total_amount == Decimal("10.00")
+
+
+def test_admin_saves_only_editable_fields_from_stale_order_and_inline(
+    auth_client, client_obj, suit
+):
+    _, user = auth_client
+    stale_order = make_order(
+        client_obj, user, [{"catalog_item": suit, "quantity": Decimal("1.00")}]
+    )
+    item = stale_order.items.get()
+    formset_class = inlineformset_factory(
+        Order, OrderItem, fields=["dry_cleaning_status"], extra=0, can_delete=False
+    )
+    formset = formset_class(
+        instance=stale_order,
+        data={
+            "items-TOTAL_FORMS": "1",
+            "items-INITIAL_FORMS": "1",
+            "items-MIN_NUM_FORMS": "0",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-id": item.pk,
+            "items-0-order": stale_order.pk,
+            "items-0-dry_cleaning_status": DryCleaningStatus.SENT,
+        },
+        prefix="items",
+    )
+    assert formset.is_valid(), formset.errors
+    services.update_order(
+        stale_order,
+        items_data=[
+            {
+                "id": item.pk,
+                "catalog_item": suit,
+                "quantity": Decimal("2.00"),
+                "unit_price": Decimal("30.00"),
+            }
+        ],
+    )
+    stale_order.notes = "Corrected notes"
+    model_admin = OrderAdmin(Order, admin.site)
+    with transaction.atomic():
+        model_admin.save_model(None, stale_order, None, True)
+        model_admin.save_formset(None, None, formset, True)
+    stale_order.refresh_from_db()
+    item.refresh_from_db()
+    assert stale_order.notes == "Corrected notes"
+    assert stale_order.total_amount == Decimal("60.00")
+    assert item.quantity == Decimal("2.00")
+    assert item.unit_price == Decimal("30.00")
+    assert item.subtotal == Decimal("60.00")
+    assert item.dry_cleaning_status == DryCleaningStatus.SENT

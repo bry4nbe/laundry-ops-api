@@ -1,8 +1,10 @@
 from decimal import ROUND_HALF_UP, Decimal
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
+
+from apps.payments import services as payment_services
 
 from .models import DryCleaningStatus, Order, OrderItem
 
@@ -70,11 +72,51 @@ def create_order(client, items_data, notes, created_by):
     return order
 
 
+def create_order_with_advance(
+    *,
+    client,
+    items_data,
+    notes,
+    created_by,
+    payment_data,
+    idempotency_key,
+    request_fingerprint,
+):
+    replay = payment_services.get_replay(idempotency_key, request_fingerprint)
+    if replay is not None:
+        return Order.objects.get(pk=replay.order_id), False
+    try:
+        with transaction.atomic():
+            order = create_order(client, items_data, notes, created_by)
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            payment_services.create_payment_for_locked_order(
+                order,
+                **payment_data,
+                created_by=created_by,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                initial=True,
+            )
+    except IntegrityError:
+        replay = payment_services.get_replay(idempotency_key, request_fingerprint)
+        if replay is None:
+            raise
+        return Order.objects.get(pk=replay.order_id), False
+    return order, True
+
+
 @transaction.atomic
 def update_order(order, client=None, notes=None, items_data=None):
     order = Order.objects.select_for_update().get(pk=order.pk)
     if order.delivered_at is not None or order.cancelled_at is not None:
         raise OrderConflict()
+    if (
+        items_data is not None
+        and order.payments.filter(voided_at__isnull=True).exists()
+    ):
+        raise OrderConflict(
+            "No se pueden cambiar los ítems ni sus importes mientras existan pagos vigentes."
+        )
     if client is not None:
         order.client = client
     if notes is not None:

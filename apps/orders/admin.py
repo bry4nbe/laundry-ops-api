@@ -33,6 +33,24 @@ class OrderAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
+    def save_model(self, request, obj, form, change):
+        Order.objects.select_for_update().get(pk=obj.pk)
+        obj.save(
+            update_fields=[
+                "client",
+                "notes",
+                "created_by",
+                "delivered_at",
+                "cancelled_at",
+                "updated_at",
+            ]
+        )
+
+    def save_formset(self, request, form, formset, change):
+        for item in formset.save(commit=False):
+            item.save(update_fields=["dry_cleaning_status"])
+        formset.save_m2m()
+
     @admin.action(description="Cancelar órdenes seleccionadas")
     def cancel_orders(self, request, queryset):
         active_orders = queryset.filter(

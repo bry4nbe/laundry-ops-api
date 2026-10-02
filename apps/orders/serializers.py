@@ -4,6 +4,8 @@ from rest_framework import serializers
 
 from apps.catalog.models import CatalogItem
 from apps.clients.models import Client
+from apps.payments import services as payment_services
+from apps.payments.serializers import InitialPaymentSerializer
 
 from . import services
 from .models import DryCleaningStatus, Order, OrderItem
@@ -74,8 +76,10 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     client = ClientMiniSerializer(read_only=True)
     status = serializers.CharField(read_only=True)
     items = OrderItemDetailSerializer(many=True, read_only=True)
-    paid_amount = serializers.SerializerMethodField()
-    balance = serializers.SerializerMethodField()
+    paid_amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True
+    )
+    balance = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
     class Meta:
         model = Order
@@ -95,20 +99,13 @@ class OrderDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-    def get_paid_amount(self, obj):
-        # Hardcoded until apps.payments exists; will sum related Payment records.
-        return Decimal("0")
-
-    def get_balance(self, obj):
-        return obj.total_amount - self.get_paid_amount(obj)
-
-
 class OrderCreateSerializer(serializers.Serializer):
     client = serializers.PrimaryKeyRelatedField(
         queryset=Client.objects.all(), pk_field=serializers.IntegerField()
     )
     notes = serializers.CharField(required=False, allow_blank=True, default="")
     items = OrderItemInputSerializer(many=True)
+    payment = InitialPaymentSerializer(required=False, allow_null=True)
 
     def validate_items(self, value):
         if not value:
@@ -116,6 +113,22 @@ class OrderCreateSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
+        payment_data = validated_data.get("payment")
+        if payment_data is not None and payment_data["amount"] > 0:
+            key, fingerprint = payment_services.request_identity(
+                self.context["request"]
+            )
+            order, self.was_created = services.create_order_with_advance(
+                client=validated_data["client"],
+                items_data=validated_data["items"],
+                notes=validated_data.get("notes", ""),
+                created_by=validated_data["created_by"],
+                payment_data=payment_data,
+                idempotency_key=key,
+                request_fingerprint=fingerprint,
+            )
+            return order
+        self.was_created = True
         return services.create_order(
             client=validated_data["client"],
             items_data=validated_data["items"],

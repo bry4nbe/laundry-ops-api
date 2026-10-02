@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -152,6 +153,7 @@ SIMPLE_JWT = {
 }
 
 # CORS
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 CORS_ALLOWED_ORIGINS = config(
     "CORS_ALLOWED_ORIGINS",
     default="http://localhost:5173",
