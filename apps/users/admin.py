@@ -7,6 +7,7 @@ from .models import User
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     list_display = ["username", "name", "email", "role", "is_active"]
+    search_fields = ["username", "name", "email"]
     fieldsets = [
         (None, {"fields": ["username", "password"]}),
         ("Personal info", {"fields": ["name", "email"]}),
@@ -34,3 +35,6 @@ class CustomUserAdmin(UserAdmin):
             },
         )
     ]
+
+    def has_delete_permission(self, request, obj=None):
+        return False

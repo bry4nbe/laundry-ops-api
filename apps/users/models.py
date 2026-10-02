@@ -18,5 +18,13 @@ class User(AbstractUser):
     USERNAME_FIELD = "username"
     REQUIRED_FIELDS = ["name"]
 
+    def clean(self):
+        super().clean()
+        self.email = self.email or None
+
+    def save(self, *args, **kwargs):
+        self.email = self.email or None
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.username
