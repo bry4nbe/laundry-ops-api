@@ -1,5 +1,30 @@
 # laundry-ops-api
 
+## Flujo de Git
+
+Flujo sencillo con `main` estable y ramas temporales `develop/<cambio>`. `develop/` es el prefijo de las ramas de trabajo, no una rama permanente llamada `develop`. No se usan ramas `codex/`, `release/` ni `hotfix/` separadas en esta etapa.
+
+1. Partir de `main` actualizada y crear una rama para cada cambio.
+2. Desarrollar en esa rama y separar los cambios en Conventional Commits, por ejemplo `fix(orders): reject invalid quantities` o `feat(payments): register manual payments`.
+3. Publicar la rama y abrir un pull request hacia `main`; revisar el diff y realizar la verificación local adecuada al cambio.
+4. Fusionar el pull request conservando los commits separados y eliminar la rama de trabajo cuando ya no se necesite. No hacer commits ni push de cambios directamente a `main`.
+
+Inicio de un cambio, con el árbol de trabajo limpio:
+
+```powershell
+git switch main
+git pull --ff-only origin main
+git switch -c develop/nombre-del-cambio
+```
+
+Después de realizar y confirmar los cambios:
+
+```powershell
+git push -u origin develop/nombre-del-cambio
+```
+
+Esta iteración establece únicamente el flujo de ramas y commits. No configura CI ni protecciones de GitHub; la configuración y las pruebas existentes de pytest se mantienen sin cambios. Hasta configurar protecciones, el uso de pull requests se cumple por convención.
+
 ## Pruebas
 
 La suite usa pytest, pytest-django y APIClient de DRF. PostgreSQL debe estar disponible con la configuración de `.env`; pytest-django crea una base de pruebas separada. Los tests generan sus propios usuarios, clientes y catálogo, sin requerir `runserver`.
