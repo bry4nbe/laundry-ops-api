@@ -7,6 +7,18 @@ from .models import Order, OrderItem
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
+    fields = [
+        "catalog_item",
+        "quantity",
+        "unit_price",
+        "subtotal",
+        "dry_cleaning_status",
+    ]
+    readonly_fields = ["catalog_item", "quantity", "unit_price", "subtotal"]
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Order)
@@ -14,8 +26,12 @@ class OrderAdmin(admin.ModelAdmin):
     list_display = ["order_number", "client", "total_amount", "status", "created_at"]
     list_filter = ["created_at"]
     search_fields = ["order_number", "client__name"]
+    readonly_fields = ["order_number", "total_amount"]
     inlines = [OrderItemInline]
     actions = ["cancel_orders"]
+
+    def has_add_permission(self, request):
+        return False
 
     @admin.action(description="Cancelar órdenes seleccionadas")
     def cancel_orders(self, request, queryset):
