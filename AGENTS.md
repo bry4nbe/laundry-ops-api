@@ -45,6 +45,7 @@ Define success criteria before implementing.
 - **Division of labor:** Codex Chat (Codex.ai project) handles refinement, decisions, research. Codex handles repo execution. Architecture decisions are made in Chat, executed here.
 - **Source of truth for decisions:** numbered ADRs live in `../contexto/decisions-lops.md`, with working context in `../contexto/context-lops.md`. Product and technical documentation live in `../laundry-ops-architecture/`. When a decision seems unclear, consult the numbered ADRs first.
 - **Code formatting:** never insert manual line breaks mid-sentence in code blocks or generated prompts. One continuous line per bullet/paragraph regardless of length.
+- **Git workflow:** keep `main` stable and develop changes on short-lived `develop/<change>` branches created from updated `main`. `develop/` is a branch prefix, not a permanent integration branch; do not use `codex/` in this repo. Use Conventional Commits, verify the feature branch, and merge locally into `main` with `--no-ff` to preserve individual commits. Verify the integrated result before pushing `main`; never push failed validations or unresolved conflicts. Pull requests are optional for additional review. Do not develop features directly on `main`.
 
 ---
 
