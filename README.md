@@ -97,6 +97,51 @@ Los usuarios se desactivan con `is_active=False`; no se pueden eliminar desde Ad
 
 Las órdenes se crean y sus ítems se modifican por la API, que valida y calcula los importes. Admin muestra número, cantidades, precios, subtotales y total como solo lectura; no permite agregar ni quitar ítems. Se mantienen las correcciones de notas, estados y seguimiento de lavado al seco.
 
+## Gastos operativos
+
+El módulo `expenses` implementa el registro plano del ADR-020, separado de órdenes y pagos. La API exige JWT de un usuario activo con `role=ADMIN`; las banderas `is_staff` e `is_superuser` no sustituyen el rol de negocio. Los operadores reciben `403`, incluso si son superusuarios. Sin JWT válido devuelve `401`.
+
+| Método y ruta | Operación |
+|---|---|
+| `POST /api/expenses/` | Registrar un gasto; devuelve `201`. |
+| `GET /api/expenses/` | Listar gastos; devuelve `200` con `count`, `next`, `previous` y `results`. Paginación de 20, orden por fecha de gasto descendente y luego ID descendente. |
+| `GET /api/expenses/{id}/` | Consultar un gasto; devuelve `200` o `404` si no existe. |
+
+Ejemplo de registro:
+
+```json
+{"amount": "25.40", "concept": "Detergente", "category": "SUPPLIES", "date": "2026-10-02", "receipt_number": "B001-123"}
+```
+
+`amount`, `concept`, `category` y `date` son obligatorios. El importe debe ser mayor que cero, tener como máximo dos decimales y no superar `99999999.99`; se calcula con `Decimal` y se devuelve como cadena con dos decimales. PostgreSQL también exige un importe positivo. Los datos inválidos devuelven `400`, sin crear registros.
+
+El concepto admite hasta 255 caracteres y no puede quedar vacío después de recortar espacios externos. Las categorías son `SUPPLIES` (insumos), `SERVICES` (servicios), `OUTSOURCING` (tercerización), `MAINTENANCE` (mantenimiento) y `OTHER` (otros). `date` es la fecha en que ocurrió el gasto, no una fecha de registro asignada por el servidor; se envía como `YYYY-MM-DD` y no tiene restricciones adicionales sobre fechas pasadas o futuras.
+
+`receipt_number` es opcional y admite hasta 100 caracteres. Ausente, `null`, vacío o compuesto solo por espacios se guarda y devuelve como `null`; los demás valores se recortan. No es un identificador único. El servidor asigna `id` y `created_by`; los valores enviados para esos campos no se usan. El responsable se devuelve como un objeto con `id` y `name` y está protegido contra eliminación.
+
+Ejemplo de respuesta:
+
+```json
+{"id": 1, "amount": "25.40", "concept": "Detergente", "category": "SUPPLIES", "date": "2026-10-02", "receipt_number": "B001-123", "created_by": {"id": 1, "name": "Administrador"}}
+```
+
+### Correcciones y límites
+
+`PUT`, `PATCH` y `DELETE` no están permitidos en la API (`405` para un administrador autenticado). Las correcciones se realizan en Django Admin → Expenses, con `role=ADMIN`, acceso de personal activo a Admin y el permiso nativo `expenses.change_expense`; `expenses.view_expense` solo permite consultar. El responsable original es de solo lectura. Admin tampoco permite altas ni eliminación individual o masiva: el registro inicial se hace por la API.
+
+El historial nativo de Admin registra el usuario, la fecha y los campos modificados; no conserva versiones completas de los valores anteriores ni implementa anulaciones. El módulo no tiene aprobaciones, reembolsos, caja, cálculos de ganancias ni integración con el dashboard. Tampoco añade idempotencia: repetir un `POST` exitoso crea otro gasto, aunque se envíe el mismo comprobante. Esta versión no incluye filtros de listado por API; Admin permite buscar por concepto o comprobante y filtrar por fecha o categoría.
+
+### Migración y pruebas
+
+`expenses.0001_initial` crea únicamente la tabla del módulo, su relación protegida con usuarios y la restricción de importe positivo; no altera las tablas de órdenes o pagos ni regenera migraciones existentes. Para habilitar el módulo en un entorno, aplicar las migraciones habituales:
+
+```powershell
+. .\.venv\Scripts\Activate.ps1
+python manage.py migrate
+```
+
+Las regresiones reutilizan pytest existente en una base PostgreSQL aislada: login y JWT real, roles, importes, campos obligatorios, comprobantes, autoría no falsificable, paginación sin consultas por cada resultado, correcciones con historial y permisos de Admin, bloqueo de eliminación y restricciones de base de datos. No se configura CI ni una nueva infraestructura de pruebas.
+
 ## Pagos
 
 Registro manual para administradores y operadores autenticados mediante `Authorization: Bearer <access>`. No integra pasarelas, bancos ni Yape/Plin: el operador registra un cobro realizado fuera del sistema. No incluye devoluciones, caja formal ni frontend.
